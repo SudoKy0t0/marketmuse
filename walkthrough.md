@@ -187,19 +187,19 @@ To try and bypass these filters, we can use yaml syntax. A scalar "|" allows us 
 
 ![hello](assets/captura12.png)
 
-<img width="1327" height="422" alt="image" src="https://github.com/user-attachments/assets/9582a658-28e9-48fe-9aae-7bbb14253505" />
+![hello](assets/captura13.png)
 
 It's valid, we could try a payload now
 
-<img width="856" height="289" alt="image" src="https://github.com/user-attachments/assets/192447fa-4b3c-4f47-b6d2-a2c99f8f8142" />
+![hello](assets/captura15.png)
 
 It seems the filter is still being applied.
 
-<img width="1277" height="264" alt="image" src="https://github.com/user-attachments/assets/307a16df-4ec8-4327-a1ab-0a912f839df1" />
+![hello](assets/captura16.png)
 
 In the collection "sessions" however, we can try the same syntax and the yaml would load
 
-<img width="791" height="204" alt="image" src="https://github.com/user-attachments/assets/94b4c0ad-6d8b-4322-824b-707d8a2a43bc" />
+![hello](assets/captura17.png)
 
 And I receive a call on my kali
 
